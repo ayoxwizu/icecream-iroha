@@ -30,8 +30,15 @@ class EmbedBot(commands.Bot):
         if GUILD_ID:
             guild_obj = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild_obj)
-            synced = await self.tree.sync(guild=guild_obj)
-            print(f"Synced {len(synced)} command(s) to guild {GUILD_ID}")
+            try:
+                synced = await self.tree.sync(guild=guild_obj)
+                print(f"Synced {len(synced)} command(s) to guild {GUILD_ID}")
+            except discord.Forbidden:
+                print(
+                    f"Could not sync commands to guild {GUILD_ID}: missing access. "
+                    f"Make sure this bot was invited with the 'applications.commands' "
+                    f"scope and is actually a member of that server."
+                )
         else:
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} command(s) globally")
