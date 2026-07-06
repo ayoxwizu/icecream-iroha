@@ -16,6 +16,7 @@ _db = _client["embed_bot"]
 embeds_collection = _db["embeds"]
 autoresponders_collection = _db["autoresponders"]
 stickies_collection = _db["stickies"]
+event_messages_collection = _db["event_messages"]
 
 
 async def ensure_indexes() -> None:
@@ -28,6 +29,9 @@ async def ensure_indexes() -> None:
     )
     await stickies_collection.create_index(
         [("guild_id", 1), ("channel_id", 1)], unique=True
+    )
+    await event_messages_collection.create_index(
+        [("guild_id", 1), ("event_type", 1)], unique=True
     )
 
 
@@ -140,3 +144,40 @@ async def delete_sticky(guild_id: int, channel_id: int) -> None:
 async def list_stickies(guild_id: int) -> list[dict]:
     cursor = stickies_collection.find({"guild_id": guild_id})
     return [doc async for doc in cursor]
+
+
+# ---------------------------------------------------------------------------
+# Event messages (boost / welcome / leave)
+# ---------------------------------------------------------------------------
+# One document per (guild_id, event_type), event_type in {"boost", "welcome",
+# "leave"}. Shape: {channel_id, message, enabled, author_id}.
+
+async def get_event_message(guild_id: int, event_type: str) -> dict | None:
+    return await event_messages_collection.find_one(
+        {"guild_id": guild_id, "event_type": event_type}
+    )
+
+
+async def save_event_message(
+    guild_id: int, event_type: str, channel_id: int, message: str, author_id: int
+) -> None:
+    """Create/replace the message for this event type and (re)enable it."""
+    await event_messages_collection.update_one(
+        {"guild_id": guild_id, "event_type": event_type},
+        {
+            "$set": {
+                "channel_id": channel_id,
+                "message": message,
+                "enabled": True,
+                "author_id": author_id,
+            }
+        },
+        upsert=True,
+    )
+
+
+async def set_event_message_enabled(guild_id: int, event_type: str, enabled: bool) -> None:
+    await event_messages_collection.update_one(
+        {"guild_id": guild_id, "event_type": event_type},
+        {"$set": {"enabled": enabled}},
+    )
