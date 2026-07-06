@@ -1,87 +1,143 @@
 """
-placeholders.py
-Replaces the supported placeholder tokens inside a stored template string.
+Placeholder handling for custom embeds.
 
-Supported everywhere (plain text or embed):
-    {username}   -> mentions the user, e.g. <@123456789>
-    {user}       -> the user's account username, no mention/ping
-    {channel}    -> mentions the channel, e.g. <#123456789>
-    {user_name}  -> the user's display name, no mention/ping
-    {process}    -> the name of the process currently being queued
-    {order}      -> the order value passed to /queue (any text, e.g. "burger")
-    {servername} -> the server's name
-
-Embed-only (resolved to image URLs you can drop into Embed.set_image / set_thumbnail):
-    {useravatar}    -> the user's avatar URL
-    {serverravatar} -> the guild's icon URL ({serveravatar} also accepted)
+Text placeholders ({username}, {user}, {servername}) can appear anywhere in
+title/description/author/footer text. Image placeholders ({serveravatar},
+{useravatar}) are only meaningful in image fields (author image, footer
+image, main image, thumbnail) and must be the *entire* field value.
 """
+
+from __future__ import annotations
+
+import re
 
 import discord
 
+PLACEHOLDER_GUIDE = (
+    "**Placeholders you can use in any text field:**\n"
+    "`{username}` \u2014 mentions the user\n"
+    "`{user}` \u2014 shows the username without mentioning\n"
+    "`{servername}` \u2014 the server's name\n\n"
+    "**Placeholders for image fields only (author image, footer image, "
+    "main image, thumbnail):**\n"
+    "`{serveravatar}` \u2014 the server's icon\n"
+    "`{useravatar}` \u2014 the user's avatar"
+)
 
-_USER_AVATAR_TOKENS = ("{useravatar}",)
-_SERVER_AVATAR_TOKENS = ("{serverravatar}", "{serveravatar}")
-_IMAGE_TOKENS = _USER_AVATAR_TOKENS + _SERVER_AVATAR_TOKENS
+AUTORESPONDER_PLACEHOLDER_GUIDE = (
+    "**Placeholders you can use in your response:**\n"
+    "`{username}` \u2014 mentions the user\n"
+    "`{user}` \u2014 shows the username without mentioning\n"
+    "`{servername}` \u2014 the server's name\n\n"
+    "**Want to attach one of your saved embeds?**\n"
+    "Just drop `{embed:name}` anywhere in your response, e.g. `{embed:welcome}`, "
+    "and that embed will be sent along with your message automatically."
+)
+
+STICKY_PLACEHOLDER_GUIDE = (
+    "**Placeholders you can use in your sticky message:**\n"
+    "`{username}` \u2014 mentions whoever just triggered a repost\n"
+    "`{user}` \u2014 shows their username without mentioning\n"
+    "`{servername}` \u2014 the server's name\n\n"
+    "**Want to attach one of your saved embeds?**\n"
+    "Just drop `{embed:name}` anywhere in your message, e.g. `{embed:rules}`, "
+    "and that embed will be sent along with the sticky automatically."
+)
+
+TEXT_PLACEHOLDERS = ("{username}", "{user}", "{servername}")
+IMAGE_PLACEHOLDERS = ("{serveravatar}", "{useravatar}")
+
+_EMBED_REF_PATTERN = re.compile(r"\{embed:([a-zA-Z0-9_\-]+)\}")
 
 
-def _normalize_token(value: str) -> str:
-    return value.strip().lower()
-
-
-def render_text(template: str, *, member: discord.Member, channel: discord.abc.GuildChannel,
-                 process_name: str, order: str = "") -> str:
-    return (
-        template.replace("{username}", member.mention)
-        .replace("{user_name}", member.display_name)
-        .replace("{user}", member.name)
-        .replace("{channel}", channel.mention)
-        .replace("{process}", process_name)
-        .replace("{order}", str(order))
-        .replace("{servername}", member.guild.name)
-    )
-
-
-def get_user_avatar_url(member: discord.Member) -> str:
-    return member.display_avatar.url
-
-
-def get_server_avatar_url(guild: discord.Guild) -> str | None:
-    return guild.icon.url if guild.icon else None
-
-
-def is_valid_image_field(value: str | None) -> bool:
+def extract_embed_reference(text: str | None) -> tuple[str, str | None]:
     """
-    True if value is empty, one of the special avatar tokens, or a raw
-    http(s) URL - i.e. anything resolve_image_field can safely turn into a
-    Discord-acceptable icon_url/image url. Discord rejects embed image
-    fields that aren't a well-formed http(s) URL, so anything else (a typo,
-    a bare domain with no scheme, etc.) must be rejected before it's saved.
+    Pull a {embed:name} reference out of an autoresponder's response text.
+
+    Returns (text_with_the_token_removed, embed_name_or_None). Only the
+    first reference is honored if more than one is present.
     """
-    if not value:
-        return True
-    value = value.strip()
-    if _normalize_token(value) in _IMAGE_TOKENS:
-        return True
-    return value.startswith("http://") or value.startswith("https://")
+    if not text:
+        return "", None
+
+    match = _EMBED_REF_PATTERN.search(text)
+    if not match:
+        return text, None
+
+    name = match.group(1)
+    cleaned = _EMBED_REF_PATTERN.sub("", text, count=1).strip()
+    return cleaned, name
 
 
-def resolve_image_field(value: str | None, *, member: discord.Member, guild: discord.Guild) -> str | None:
+def resolve_text(text: str | None, member: discord.Member, guild: discord.Guild) -> str | None:
+    """Replace text placeholders. Safe to call on any string field."""
+    if not text:
+        return text
+
+    replacements = {
+        "{username}": member.mention,
+        "{user}": str(member.display_name),
+        "{servername}": guild.name,
+    }
+    for token, value in replacements.items():
+        text = text.replace(token, value)
+    return text
+
+
+def resolve_image(value: str | None, member: discord.Member, guild: discord.Guild) -> str | None:
     """
-    Resolves an embed image/icon field that may contain {useravatar},
-    {serverravatar} (or the {serveravatar} typo, accepted as an alias), a
-    raw URL, or be empty. Falls back to None for anything that isn't a
-    well-formed http(s) URL, since Discord rejects malformed icon/image
-    URLs with a 400 rather than ignoring them - this keeps a bad value
-    already saved in the database from crashing /queue.
+    Resolve an image field. If the whole field is exactly a supported image
+    placeholder, swap it for the matching URL. Otherwise treat it as a
+    literal URL (after also resolving any text placeholders, in case
+    someone builds a dynamic URL, though that's an edge case).
     """
     if not value:
         return None
-    value = value.strip()
-    token = _normalize_token(value)
-    if token in _USER_AVATAR_TOKENS:
-        return get_user_avatar_url(member)
-    if token in _SERVER_AVATAR_TOKENS:
-        return get_server_avatar_url(guild)
-    if value.startswith("http://") or value.startswith("https://"):
-        return value
-    return None
+
+    stripped = value.strip()
+    if stripped == "{serveravatar}":
+        return guild.icon.url if guild.icon else None
+    if stripped == "{useravatar}":
+        return member.display_avatar.url
+
+    return resolve_text(value, member, guild)
+
+
+def build_preview_embed(draft: dict, member: discord.Member, guild: discord.Guild) -> discord.Embed:
+    """Build a live preview of the embed being edited, with placeholders resolved."""
+    color = draft.get("color")
+    embed = discord.Embed(
+        title=resolve_text(draft.get("title"), member, guild) or None,
+        description=resolve_text(draft.get("description"), member, guild) or None,
+        color=color if color is not None else discord.Color.blurple(),
+    )
+
+    author_text = resolve_text(draft.get("author_text"), member, guild)
+    if author_text:
+        embed.set_author(
+            name=author_text,
+            icon_url=resolve_image(draft.get("author_image"), member, guild),
+        )
+
+    footer_text = resolve_text(draft.get("footer_text"), member, guild)
+    if footer_text:
+        embed.set_footer(
+            text=footer_text,
+            icon_url=resolve_image(draft.get("footer_image"), member, guild),
+        )
+
+    image_url = resolve_image(draft.get("image"), member, guild)
+    if image_url:
+        embed.set_image(url=image_url)
+
+    thumb_url = resolve_image(draft.get("thumbnail"), member, guild)
+    if thumb_url:
+        embed.set_thumbnail(url=thumb_url)
+
+    if draft.get("timestamp"):
+        embed.timestamp = discord.utils.utcnow()
+
+    if not embed.title and not embed.description and not embed.fields:
+        embed.description = "*(Nothing set yet \u2014 use the buttons below to edit this embed.)*"
+
+    return embed
