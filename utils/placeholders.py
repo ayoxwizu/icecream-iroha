@@ -44,6 +44,15 @@ STICKY_PLACEHOLDER_GUIDE = (
     "and that embed will be sent along with the sticky automatically."
 )
 
+EVENT_PLACEHOLDER_GUIDE = (
+    "**Placeholders you can use in your message:**\n"
+    "`{username}` \u2014 mentions the member\n"
+    "`{servername}` \u2014 the server's name\n\n"
+    "**Want to attach one of your saved embeds?**\n"
+    "Just drop `{embed:name}` anywhere in your message, e.g. `{embed:welcome}`, "
+    "and that embed will be sent along with it automatically."
+)
+
 TEXT_PLACEHOLDERS = ("{username}", "{user}", "{servername}")
 IMAGE_PLACEHOLDERS = ("{serveravatar}", "{useravatar}")
 
