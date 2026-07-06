@@ -41,6 +41,14 @@ from bot import EmbedBot  # noqa: E402  (embed / autoresponder / sticky bot)
 from main import QueueBot  # noqa: E402  (ice-cream queue bot)
 
 
+async def _run_bot(name: str, coro) -> None:
+    """Run one bot's start() coroutine, logging (not crashing on) failures."""
+    try:
+        await coro
+    except Exception:
+        log.exception("%s crashed - the other bot will keep running.", name)
+
+
 async def run_forever() -> None:
     token1 = os.environ["TOKEN1"]
     token2 = os.environ["TOKEN2"]
@@ -50,13 +58,13 @@ async def run_forever() -> None:
     bot2 = QueueBot(guild_id=guild_id2)
 
     async with bot1, bot2:
-        # asyncio.gather runs both bots' event loops concurrently. If either
-        # bot crashes, gather raises and the whole process exits - which is
-        # what we want on Railway, since a crashed process gets restarted
-        # and brings both bots back up together.
+        # return_exceptions=True (via the _run_bot wrapper) means a crash in
+        # one bot is logged and contained, instead of killing both bots -
+        # a permission/sync problem on one Discord application shouldn't take
+        # the other one offline too.
         await asyncio.gather(
-            bot1.start(token1),
-            bot2.start(token2),
+            _run_bot("bot1 (EmbedBot)", bot1.start(token1)),
+            _run_bot("bot2 (QueueBot)", bot2.start(token2)),
         )
 
 
