@@ -41,8 +41,16 @@ class QueueBot(commands.Bot):
 
         guild = discord.Object(id=self.guild_id)
         self.tree.copy_global_to(guild=guild)
-        synced = await self.tree.sync(guild=guild)
-        log.info("Synced %d commands to guild %s", len(synced), self.guild_id)
+        try:
+            synced = await self.tree.sync(guild=guild)
+            log.info("Synced %d commands to guild %s", len(synced), self.guild_id)
+        except discord.Forbidden:
+            log.error(
+                "Could not sync commands to guild %s: missing access. "
+                "Make sure this bot was invited with the 'applications.commands' "
+                "scope and is actually a member of that server.",
+                self.guild_id,
+            )
 
     async def on_ready(self):
         log.info("Logged in as %s (id: %s)", self.user, self.user.id)
