@@ -26,6 +26,7 @@ class EmbedBot(commands.Bot):
         await self.load_extension("cogs.embed")
         await self.load_extension("cogs.autoresponder")
         await self.load_extension("cogs.sticky")
+        await self.load_extension("cogs.events")
 
         if GUILD_ID:
             guild_obj = discord.Object(id=int(GUILD_ID))
